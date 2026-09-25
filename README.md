@@ -36,10 +36,10 @@ Install:
     pip install pandas numpy requests scikit-learn xgboost
 
 Run:
-    python kiaar_best_forecast.py
+    python model.py
 
 Force retraining:
-    python kiaar_best_forecast.py --retrain
+    python model.py --retrain
 
 For another location, change LATITUDE/LONGITUDE and REFERENCE_MODEL.
 
