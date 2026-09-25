@@ -63,6 +63,23 @@ Example output format:
 
 KIAAR AGRO FARMS – LOCALIZED 7-DAY FORECAST
 
+Live Forecast Output
+
+The program generates:
+
+Current temperature
+Next 7 days of temperature forecast
+Daily minimum temperature
+Daily maximum temperature
+Daily mean temperature
+ML-corrected final temperature
+Selected correction model for each forecast day
+Correction status for each lead day
+
+Example output format:
+
+KIAAR AGRO FARMS – LOCALIZED 7-DAY FORECAST
+
 Current temperature:
 XX.X °C
 
