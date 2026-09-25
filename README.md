@@ -77,15 +77,4 @@ Selected correction model for each forecast day
 Correction status for each lead day
 
 Example output format:
-
-KIAAR AGRO FARMS – LOCALIZED 7-DAY FORECAST
-
-Current temperature:
-XX.X °C
-
-Next 7-day temperature outlook:
-
-Date          Min       Max       Mean      Final
-YYYY-MM-DD    XX.X      XX.X      XX.X      XX.X
-YYYY-MM-DD    XX.X      XX.X      XX.X      XX.X
-...
+<img width="1232" height="657" alt="image" src="https://github.com/user-attachments/assets/a348bc82-4a58-44be-b0de-7d8eae4a903b" />
