@@ -50,31 +50,15 @@ For another location, change LATITUDE/LONGITUDE and REFERENCE_MODEL.
 
 The program generates:
 
-Current temperature
-Next 7 days of temperature forecast
-Daily minimum temperature
-Daily maximum temperature
-Daily mean temperature
-ML-corrected final temperature
-Selected correction model for each forecast day
-Correction status for each lead day
+Current temperature,
+Next 7 days of temperature forecast,
+Daily minimum temperature,
+Daily maximum temperature,
+Daily mean temperature,
+ML-corrected final temperature,
+Selected correction model for each forecast day,
+Correction status for each lead day.
 
-Example output format:
-
-KIAAR AGRO FARMS – LOCALIZED 7-DAY FORECAST
-
-Live Forecast Output
-
-The program generates:
-
-Current temperature
-Next 7 days of temperature forecast
-Daily minimum temperature
-Daily maximum temperature
-Daily mean temperature
-ML-corrected final temperature
-Selected correction model for each forecast day
-Correction status for each lead day
 
 Example output format:
 <img width="1355" height="822" alt="image" src="https://github.com/user-attachments/assets/77f47213-f765-42a7-bc2e-4766f2d1a700" />
