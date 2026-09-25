@@ -21,7 +21,9 @@ Improved pipeline:
 11. Live 7-day ECMWF forecast is corrected only for lead days
     where validation proved that correction helps.
 
-IMPORTANT:
+--------------------------------------------------------------
+
+**IMPORTANT:**
 
 This version automatically downloads an independent
 ERA5-Land reanalysis reference through the Open-Meteo API.
@@ -29,8 +31,8 @@ ERA5-Land reanalysis reference through the Open-Meteo API.
 ERA5-Land is NOT a physical KIAAR station measurement.
 It is a gridded reanalysis/reference dataset.
 
-
-STEPS TO RUN THE PROGRAM:
+-------------------------------------------------------------
+**STEPS TO RUN THE PROGRAM:**
 
 Install:
     pip install pandas numpy requests scikit-learn xgboost
