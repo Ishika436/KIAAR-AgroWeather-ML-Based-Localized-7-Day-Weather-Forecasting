@@ -44,3 +44,31 @@ Force retraining:
     python kiaar_best_forecast.py --retrain
 
 For another location, change LATITUDE/LONGITUDE and REFERENCE_MODEL
+
+----------------------------------------------------------------------------
+**LIVE FORECAST OUTPUT**:
+
+The program generates:
+
+Current temperature
+Next 7 days of temperature forecast
+Daily minimum temperature
+Daily maximum temperature
+Daily mean temperature
+ML-corrected final temperature
+Selected correction model for each forecast day
+Correction status for each lead day
+
+Example output format:
+
+KIAAR AGRO FARMS – LOCALIZED 7-DAY FORECAST
+
+Current temperature:
+XX.X °C
+
+Next 7-day temperature outlook:
+
+Date          Min       Max       Mean      Final
+YYYY-MM-DD    XX.X      XX.X      XX.X      XX.X
+YYYY-MM-DD    XX.X      XX.X      XX.X      XX.X
+...
