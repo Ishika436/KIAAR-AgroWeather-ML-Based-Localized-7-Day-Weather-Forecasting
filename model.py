@@ -1362,24 +1362,29 @@ class KiaarAgroWeather:
         return models
 
     # ------------------------------------------------------------
-    # LIVE FORECAST
+    # LOCATION / LIVE FORECAST
     # ------------------------------------------------------------
 
-    def live_forecast(self, models):
+    def _forecast_location(
+        self,
+        models,
+        latitude,
+        longitude,
+        site_name,
+        print_report=False,
+        save_files=False,
+    ):
+        """Fetch and ML-correct the live 7-day forecast for one location."""
         logger.info(
-            "Fetching live ECMWF forecast..."
+            "Fetching live ECMWF forecast for %s...",
+            site_name,
         )
 
         params = {
-            "latitude": LATITUDE,
-            "longitude": LONGITUDE,
-            "hourly": ",".join(
-                self.weather_vars
-            ),
-            "current": (
-                "temperature_2m,"
-                "relative_humidity_2m"
-            ),
+            "latitude": latitude,
+            "longitude": longitude,
+            "hourly": ",".join(self.weather_vars),
+            "current": "temperature_2m,relative_humidity_2m",
             "models": NWP_MODEL,
             "forecast_days": 8,
             "timezone": "auto",
@@ -1393,7 +1398,7 @@ class KiaarAgroWeather:
 
         if response is None:
             raise RuntimeError(
-                "Live forecast download failed."
+                f"Live forecast download failed for {site_name}."
             )
 
         payload = response.json()
@@ -1410,9 +1415,7 @@ class KiaarAgroWeather:
             NWP_MODEL,
         )
 
-        hourly["time"] = pd.to_datetime(
-            hourly["time"]
-        )
+        hourly["time"] = pd.to_datetime(hourly["time"])
 
         now = (
             pd.to_datetime(current["time"])
@@ -1433,16 +1436,11 @@ class KiaarAgroWeather:
         ).dt.total_seconds() / 3600
 
         future["lead_days"] = np.clip(
-            np.ceil(
-                future["hours_ahead"] / 24
-            ),
+            np.ceil(future["hours_ahead"] / 24),
             1,
             MAX_LEAD,
         ).astype(int)
 
-        # Keep exactly the next 7 calendar days:
-        # tomorrow through 7 days ahead.
-        # Today's current temperature is shown separately.
         current_date = now.date()
         last_forecast_date = (
             current_date + timedelta(days=MAX_LEAD)
@@ -1454,25 +1452,18 @@ class KiaarAgroWeather:
         ].copy()
 
         for variable in self.weather_vars:
-            future[f"fc_{variable}"] = (
-                future[variable]
-            )
+            future[f"fc_{variable}"] = future[variable]
 
-        future = self.add_calendar_features(
-            future
-        )
+        future = self.add_calendar_features(future)
 
         future["temp_humidity_interaction"] = (
             future["fc_temperature_2m"]
             * future["fc_relative_humidity_2m"]
-            if "fc_relative_humidity_2m"
-            in future.columns
+            if "fc_relative_humidity_2m" in future.columns
             else 0.0
         )
 
-        future["temp_squared"] = (
-            future["fc_temperature_2m"] ** 2
-        )
+        future["temp_squared"] = future["fc_temperature_2m"] ** 2
 
         future["wind_squared"] = (
             future["fc_wind_speed_10m"] ** 2
@@ -1480,69 +1471,29 @@ class KiaarAgroWeather:
             else 0.0
         )
 
-        # No observation-lag features are used in the production
-        # model, because the same live information is not reliably
-        # available from the delayed ERA5-Land reference dataset.
+        X = future[self.feature_cols].copy()
+        X = X.replace([np.inf, -np.inf], np.nan)
+        X = X.fillna(X.median(numeric_only=True))
 
-        # Missing live lag values are filled using
-        # training-time feature medians if needed.
-        X = future[
-            self.feature_cols
-        ].copy()
-
-        X = X.replace(
-            [np.inf, -np.inf],
-            np.nan,
-        )
-
-        X = X.fillna(
-            X.median(
-                numeric_only=True
-            )
-        )
-
-        # --------------------------------------------------------
-        # Apply the selected model separately for each lead day.
-        # --------------------------------------------------------
-
-        future["nwp_temp"] = (
-            future["temperature_2m"]
-        )
-
-        future["ml_temp"] = (
-            future["nwp_temp"]
-        )
-
+        future["nwp_temp"] = future["temperature_2m"]
+        future["ml_temp"] = future["nwp_temp"]
         future["correction"] = 0.0
 
         for lead in range(1, MAX_LEAD + 1):
-
-            mask = (
-                future["lead_days"]
-                == lead
-            )
+            mask = future["lead_days"] == lead
 
             if not mask.any():
                 continue
 
-            if not self.use_correction.get(
-                lead,
-                False,
-            ):
+            if not self.use_correction.get(lead, False):
                 continue
 
-            model = models.get(
-                str(lead)
-            )
-
+            model = models.get(str(lead))
             if model is None:
                 continue
 
-            correction = model.predict(
-                X.loc[mask]
-            )
+            correction = model.predict(X.loc[mask])
 
-            # Safety bound learned from historical training residuals.
             bounds = self.correction_bounds.get(lead)
             if bounds is not None:
                 correction = np.clip(
@@ -1551,166 +1502,213 @@ class KiaarAgroWeather:
                     bounds[1],
                 )
 
-            future.loc[
-                mask,
-                "correction"
-            ] = correction
-
-            future.loc[
-                mask,
-                "ml_temp"
-            ] = (
-                future.loc[
-                    mask,
-                    "nwp_temp"
-                ].to_numpy()
+            future.loc[mask, "correction"] = correction
+            future.loc[mask, "ml_temp"] = (
+                future.loc[mask, "nwp_temp"].to_numpy()
                 + correction
             )
 
-        # --------------------------------------------------------
-        # Daily summary
-        # --------------------------------------------------------
-
         daily = (
-            future.groupby(
-                future["time"].dt.date
-            )
+            future.groupby(future["time"].dt.date)
             .agg(
-                nwp_min=(
-                    "nwp_temp",
-                    "min",
-                ),
-                nwp_max=(
-                    "nwp_temp",
-                    "max",
-                ),
-                ml_min=(
-                    "ml_temp",
-                    "min",
-                ),
-                ml_max=(
-                    "ml_temp",
-                    "max",
-                ),
-                ml_mean=(
-                    "ml_temp",
-                    "mean",
-                ),
-                final_temperature=(
-                    "ml_temp",
-                    "max",
-                ),
+                nwp_min=("nwp_temp", "min"),
+                nwp_max=("nwp_temp", "max"),
+                ml_min=("ml_temp", "min"),
+                ml_max=("ml_temp", "max"),
+                ml_mean=("ml_temp", "mean"),
+                final_temperature=("ml_temp", "max"),
             )
             .round(1)
         )
 
-        print("\n" + "=" * 78)
-        print(
-            f"{SITE_NAME.upper()} - LOCALIZED 7-DAY FORECAST"
-        )
-        print("=" * 78)
-
-        print(
-            f"As of: {now.strftime('%Y-%m-%d %H:%M')}"
-        )
-
-        # Current temperature is taken directly from the live ECMWF
-        # current-temperature field and is displayed separately from
-        # the 7 full forecast days.
         current_temp = current.get("temperature_2m")
         current_temp = (
             float(current_temp)
-            if current_temp is not None
-            and pd.notna(current_temp)
+            if current_temp is not None and pd.notna(current_temp)
             else float("nan")
         )
 
-        print("\nCurrent temperature:")
-        if np.isfinite(current_temp):
-            print(f"{current_temp:.1f} °C")
-        else:
-            print("Unavailable")
+        if print_report:
+            print("\n" + "=" * 78)
+            print(f"{site_name.upper()} - LOCALIZED 7-DAY FORECAST")
+            print("=" * 78)
+            print(f"As of: {now.strftime('%Y-%m-%d %H:%M')}")
+            print("\nCurrent temperature:")
+            if np.isfinite(current_temp):
+                print(f"{current_temp:.1f} °C")
+            else:
+                print("Unavailable")
 
-        print("\nNext 7-day temperature outlook (°C):")
-        print(
-            "Final temperature = ML-corrected daily maximum; "
-            "Mean is the ML-corrected daily average."
-        )
+            print("\nNext 7-day temperature outlook (°C):")
+            print(
+                "Final temperature = ML-corrected daily maximum; "
+                "Mean is the ML-corrected daily average."
+            )
 
-        display_daily = daily[[
-            "ml_min",
-            "ml_max",
-            "ml_mean",
-            "final_temperature",
+            display_daily = daily[[
+                "ml_min",
+                "ml_max",
+                "ml_mean",
+                "final_temperature",
+            ]].copy()
+
+            display_daily.columns = [
+                "min_temperature",
+                "max_temperature",
+                "mean_temperature",
+                "final_temperature",
+            ]
+
+            print(display_daily.to_string())
+
+            print("\nSelected correction models:")
+            for lead in range(1, MAX_LEAD + 1):
+                print(
+                    f"Day {lead}: "
+                    f"{self.selected_models.get(lead, 'N/A')} | "
+                    f"Correction: "
+                    f"{self.use_correction.get(lead, False)}"
+                )
+            print("=" * 78)
+
+        output = future[[
+            "time",
+            "lead_days",
+            "nwp_temp",
+            "correction",
+            "ml_temp",
         ]].copy()
 
-        display_daily.columns = [
-            "min_temperature",
-            "max_temperature",
-            "mean_temperature",
-            "final_temperature",
-        ]
-
-        print(display_daily.to_string())
-
-        print(
-            "\nSelected correction models:"
+        output[["nwp_temp", "correction", "ml_temp"]] = (
+            output[["nwp_temp", "correction", "ml_temp"]].round(2)
         )
 
-        for lead in range(1, MAX_LEAD + 1):
-            print(
-                f"Day {lead}: "
-                f"{self.selected_models.get(lead, 'N/A')} | "
-                f"Correction: "
-                f"{self.use_correction.get(lead, False)}"
+        if save_files:
+            daily_output = daily.reset_index().rename(
+                columns={"index": "date"}
+            )
+            daily_output.to_csv(
+                "kiaar_7day_daily_summary.csv",
+                index=False,
+            )
+
+            output.to_csv(FORECAST_FILE, index=False)
+            logger.info("Saved forecast to %s", FORECAST_FILE)
+
+        return {
+            "site_name": site_name,
+            "latitude": latitude,
+            "longitude": longitude,
+            "now": now,
+            "current_temperature": current_temp,
+            "daily": daily,
+            "hourly": output,
+        }
+
+    def live_forecast(self, models):
+        """Generate the KIAAR forecast plus a second nearby-villages table."""
+
+        # Main KIAAR forecast remains exactly as before.
+        kiaar = self._forecast_location(
+            models,
+            LATITUDE,
+            LONGITUDE,
+            SITE_NAME,
+            print_report=True,
+            save_files=True,
+        )
+
+        # Fixed coordinates for the three nearby villages.
+        # These are taken from the project location table and avoid
+        # geocoding errors/ambiguous village-name matches.
+        village_coordinates = {
+            "Bisnal (Bisanal)": (16.3571, 75.1438),
+            "Kesarkoppa (Kesrakoppa)": (16.3685, 75.1322),
+            "Nagral (Nagaral)": (16.3458, 75.1764),
+        }
+
+        village_results = {}
+
+        print("\n" + "=" * 78)
+        print("NEARBY VILLAGES - LOCALIZED 7-DAY TEMPERATURE OUTLOOK")
+        print("=" * 78)
+        print(
+            "Values below are the ML-corrected daily maximum temperature "
+            "for each village."
+        )
+
+        current_rows = []
+
+        for village, (latitude, longitude) in village_coordinates.items():
+            try:
+                result = self._forecast_location(
+                    models,
+                    latitude,
+                    longitude,
+                    village,
+                    print_report=False,
+                    save_files=False,
+                )
+
+                village_results[village] = result
+                current_rows.append({
+                    "location": village,
+                    "current_temperature": result["current_temperature"],
+                })
+
+                logger.info(
+                    "%s coordinates: %.4f, %.4f",
+                    village,
+                    latitude,
+                    longitude,
+                )
+
+            except Exception as exc:
+                logger.error(
+                    "Could not generate forecast for %s: %s",
+                    village,
+                    exc,
+                )
+
+        if current_rows:
+            current_table = pd.DataFrame(current_rows).round(1)
+            print("\nCurrent temperature by location (°C):")
+            print(current_table.to_string(index=False))
+
+        if village_results:
+            village_rows = []
+
+            for village, result in village_results.items():
+                daily_village = result["daily"]
+
+                for date, row in daily_village.iterrows():
+                    village_rows.append({
+                        "date": date,
+                        "location": village,
+                        "min_temperature": row["ml_min"],
+                        "max_temperature": row["ml_max"],
+                        "mean_temperature": row["ml_mean"],
+                        "final_temperature": row["final_temperature"],
+                    })
+
+            village_table = pd.DataFrame(village_rows).round(1)
+
+            print("\nNearby villages - 7-day temperature outlook (°C):")
+            print(village_table.to_string(index=False))
+
+            village_table.to_csv(
+                "kiaar_nearby_villages_7day_forecast.csv",
+                index=False,
+            )
+
+            logger.info(
+                "Saved nearby-village forecast to "
+                "kiaar_nearby_villages_7day_forecast.csv"
             )
 
         print("=" * 78)
 
-        output = future[
-            [
-                "time",
-                "lead_days",
-                "nwp_temp",
-                "correction",
-                "ml_temp",
-            ]
-        ].copy()
-
-        # Save the 7-day daily summary as a separate, easy-to-use file.
-        daily_output = daily.reset_index().rename(
-            columns={"time": "date"}
-        )
-        daily_output.to_csv(
-            "kiaar_7day_daily_summary.csv",
-            index=False,
-        )
-
-        output[
-            [
-                "nwp_temp",
-                "correction",
-                "ml_temp",
-            ]
-        ] = output[
-            [
-                "nwp_temp",
-                "correction",
-                "ml_temp",
-            ]
-        ].round(2)
-
-        output.to_csv(
-            FORECAST_FILE,
-            index=False,
-        )
-
-        logger.info(
-            "Saved forecast to %s",
-            FORECAST_FILE,
-        )
-
-        return output
+        return kiaar
 
 
 # ================================================================
